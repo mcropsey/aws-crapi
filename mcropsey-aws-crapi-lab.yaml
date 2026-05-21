@@ -271,25 +271,8 @@ Resources:
         - Id: !Ref CrAPIInstance
           Port: 8888
 
-  TGAPI:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties:
-      Name: mcropsey-api-tg
-      Protocol: HTTP
-      Port: 8080
-      VpcId: !Ref VPC
-      TargetType: instance
-      HealthCheckPath: /
-      HealthCheckPort: "8080"
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 10
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 5
-      Matcher:
-        HttpCode: 200-404
-      Targets:
-        - Id: !Ref CrAPIInstance
-          Port: 8080
+  # crapi-identity port 8080 is internal to Docker only - all API traffic
+  # routes through crapi-web (nginx) on port 8888, same as the web UI.
 
   TGMailHog:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -322,16 +305,6 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TGWeb
-
-  ListenerAPI:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties:
-      LoadBalancerArn: !Ref ALB
-      Port: 8080
-      Protocol: HTTP
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref TGAPI
 
   ListenerMailHog:
     Type: AWS::ElasticLoadBalancingV2::Listener
