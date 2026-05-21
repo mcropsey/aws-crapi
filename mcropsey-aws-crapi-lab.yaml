@@ -4,12 +4,13 @@ Description: >
   VPC 10.2.0.0/16. Ports: 80 (web), 8080 (REST API), 8025 (MailHog).
   Use ALBRestAPIURL output as the upstream URL in Zuplo.
   Account: 491489166083  Region: us-east-2
+  OS: Ubuntu 24.04 LTS (noble) - supported through April 2029
 
 Parameters:
 
   KeyPairName:
     Type: AWS::EC2::KeyPair::KeyName
-    Default: mcropsey-key
+    Default: mcropsey-ed25519
 
   InstanceType:
     Type: String
@@ -19,8 +20,8 @@ Parameters:
 
   AMIId:
     Type: AWS::EC2::Image::Id
-    Default: ami-0f5b1543e7f934f48
-    Description: Amazon Linux 2023 (al2023-ami-2023.11.20260514.0-kernel-6.18-x86_64)
+    Default: ami-0b4624933067d393a
+    Description: Ubuntu 24.04 LTS (Noble Numbat) - us-east-2 - supported through April 2029
 
   AllowedSSHCIDR:
     Type: String
@@ -195,12 +196,31 @@ Resources:
           exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
           echo "==> System update"
-          dnf update -y
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -y
+          apt-get upgrade -y
 
-          echo "==> Installing Docker + git"
-          dnf install -y docker git
+          echo "==> Installing prerequisites"
+          apt-get install -y ca-certificates curl gnupg lsb-release git
+
+          echo "==> Installing Docker CE"
+          install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+            -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+            https://download.docker.com/linux/ubuntu \
+            $(lsb_release -cs) stable" \
+            > /etc/apt/sources.list.d/docker.list
+
+          apt-get update -y
+          apt-get install -y docker-ce docker-ce-cli containerd.io \
+            docker-buildx-plugin docker-compose-plugin
+
           systemctl enable --now docker
-          usermod -aG docker ec2-user
+          usermod -aG docker ubuntu
 
           echo "==> Installing Docker Compose standalone binary"
           curl -fsSL \
@@ -271,8 +291,25 @@ Resources:
         - Id: !Ref CrAPIInstance
           Port: 8888
 
-  # crapi-identity port 8080 is internal to Docker only - all API traffic
-  # routes through crapi-web (nginx) on port 8888, same as the web UI.
+  TGAPI:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: mcropsey-api-tg
+      Protocol: HTTP
+      Port: 8080
+      VpcId: !Ref VPC
+      TargetType: instance
+      HealthCheckPath: /
+      HealthCheckPort: "8080"
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      Matcher:
+        HttpCode: 200-404
+      Targets:
+        - Id: !Ref CrAPIInstance
+          Port: 8080
 
   TGMailHog:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -305,6 +342,16 @@ Resources:
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref TGWeb
+
+  ListenerAPI:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 8080
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TGAPI
 
   ListenerMailHog:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -344,7 +391,7 @@ Outputs:
 
   SSHCommand:
     Description: SSH to the crAPI instance
-    Value: !Sub "ssh -i ~/.ssh/mcropsey-key.pem ec2-user@${CrAPIInstance.PublicIp}"
+    Value: !Sub "ssh -i ~/.ssh/mcropsey-key.pem ubuntu@${CrAPIInstance.PublicIp}"
 
   DockerLogsCommand:
     Description: Watch crAPI container logs after SSH
