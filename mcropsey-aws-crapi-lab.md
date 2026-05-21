@@ -1,3 +1,8 @@
+### NOTE:  IF Running deploy.sh run:
+
+./deploy.sh --fresh
+
+
 # mcropsey AWS crAPI Lab
 
 crAPI running on EC2 via Docker Compose, fronted by an ALB, ready for Zuplo API Gateway.
